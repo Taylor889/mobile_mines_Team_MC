@@ -1,0 +1,262 @@
+classdef SEMine < SEBase
+    events
+        Armed
+        Disarmed
+        Exploded
+    end
+
+    properties
+        pos_x;
+        pos_y;
+        pos_z = 0;  % right on the surface by default
+        damageRange = 0.25 % The radius range that enemy ships can be engaged by friendly mines
+        axes_h;
+        graphic_h;
+        detonation_h;
+        face_color = [1 0.5 0.5];
+        marker = 'hexagram';
+   
+        
+        explosion = 'o';
+        explosionSize = 30;
+        explosionColor = 'none';
+
+    end
+
+
+    % SetAccess protected properties require objects to use a method to
+    % change their value, but they can be accessed using the property name
+    properties (SetAccess = protected)
+        armed = false % (T/F)
+        alive = true % (T/F)
+
+        detRangeGraphic;
+        detectRange = 30 % The radius range around a mine that can detect enemy ships
+    end
+    
+    methods
+        function obj = SEMine(position_x, position_y, axisHandle)
+            % If position arguments exist and are not empty, set the position
+            if nargin >= 2 && ~isempty(position_x) && ~isempty(position_y)
+                obj.setPosition(position_x, position_y);
+            else
+                % Otherwise, set default positions (0)
+                obj.pos_x = 0;
+                obj.pos_y = 0;
+            end
+
+            % If axis handle exists, initialize display
+            if nargin > 2 && ~isempty(axisHandle)
+                obj.initDisplay(axisHandle);
+            end
+        end
+        function delete(obj)
+            % deleteHandles is a custom function.
+            deleteHandles(obj.graphic_h);
+            deleteHandles(obj.detonation_h);
+            deleteHandles(obj.detRangeGraphic);
+            deleteHandles(obj.detRangeGraphic);
+
+            % This is the superclass method for delete the object, which we
+            % need to specifiy explicitly since we have overloaded the
+            % method.
+            delete@handle(obj);
+        end
+
+        % Can  be used to assign an axes handle for the mine to be renderd
+        % on.  If the mine handle does not exist, it will be created.
+        function initDisplay(obj, axes_handle_in)
+    if nargin > 1
+        obj.axes_h = axes_handle_in;  % attach axes first
+    end
+
+    if isempty(obj.graphic_h) || ~ishandle(obj.graphic_h)
+        % Create the mine graphics with proper parent
+        obj.graphic_h = line('Parent', obj.axes_h, ...
+                     'XData', obj.pos_x, 'YData', obj.pos_y, ...
+                     'Marker', obj.marker, ...
+                     'MarkerFaceColor', [1 0 0], ... % bright red for visibility
+                     'MarkerEdgeColor', 'k', ...
+                     'MarkerSize', 10, ...           % make it visible
+                     'Visible', 'on');
+
+obj.detonation_h = line('Parent', obj.axes_h, ...
+                        'XData', obj.pos_x, 'YData', obj.pos_y, ...
+                        'Marker', 'o', ...
+                        'MarkerEdgeColor', 'blue', ...
+                        'MarkerSize', obj.damageRange, ...
+                        'Visible', 'on');
+
+obj.detRangeGraphic = line('Parent', obj.axes_h, ...
+                           'XData', obj.pos_x, 'YData', obj.pos_y, ...
+                           'Marker', obj.explosion, ...
+                           'MarkerFaceColor', obj.explosionColor, ...
+                           'MarkerEdgeColor', 'k', ...
+                           'MarkerSize', obj.detectRange, ...
+                           'Visible', 'on');
+    end
+
+    obj.updateDisplay();  % refresh graphics
+end
+        function didSet = setDetectRange(obj, detRange)
+            didSet = false;
+            if nargin>1 && isnumeric(detRange)
+                if isempty(detRange)
+                    detRange = 0;
+                end
+                if detRange>=0
+                    obj.detectRange = detRange;
+                    didSet = true;
+                end
+            end
+        end
+
+       function setAxesHandle(obj, axes_handle_in)
+            if nargin>1 && ishandle(axes_handle_in)
+                obj.axes_h = axes_handle_in;
+            end
+
+             % Force all graphic objects to attach to axes
+            if ~isempty(obj.axes_h)
+                if ishandle(obj.graphic_h), set(obj.graphic_h, 'Parent', obj.axes_h); end
+                if ishandle(obj.detonation_h), set(obj.detonation_h, 'Parent', obj.axes_h); end
+                if ishandle(obj.detRangeGraphic), set(obj.detRangeGraphic, 'Parent', obj.axes_h); end
+            end
+
+            obj.updateDisplay();
+        end
+
+        function updateDisplay(obj)
+            if ishandle(obj.graphic_h)
+                % Determine visibility and marker style
+                if obj.isAlive
+                    markerValue = 'o';          % simple visible circle
+                    marker_face_color = [1 0.5 0.5]; % pinkish/red
+                    visibility = 'on';
+                else
+                    markerValue = 'x';
+                    marker_face_color = [1 0 0];
+                    visibility = 'on';
+                end
+
+                % Draw mine marker
+                set(obj.graphic_h, 'XData', obj.pos_x, 'YData', obj.pos_y, ...
+                'Marker', markerValue, 'MarkerFaceColor', marker_face_color, ...
+                    'MarkerEdgeColor', 'k', 'MarkerSize', 25, 'Visible', visibility);
+
+                % Detonation marker (small circle)
+                set(obj.detonation_h, 'XData', obj.pos_x, 'YData', obj.pos_y, ...
+                    'Visible', visibility, 'Marker', 'o', 'MarkerSize', obj.damageRange*20);
+
+                % Detection range marker (transparent circle)
+                if obj.detectRange > 0
+                    set(obj.detRangeGraphic, 'XData', obj.pos_x, 'YData', obj.pos_y, ...
+                        'Marker', 'o', 'MarkerFaceColor', 'none', 'MarkerEdgeColor', 'b', ...
+                        'MarkerSize', obj.detectRange*2, 'Visible', visibility);
+                else
+                    set(obj.detRangeGraphic, 'Visible', 'off');
+                    end
+            end
+        end
+
+        % TODO - talk with @hyatt about possible misconception with setting
+        % dx, dy and updating the position.
+        function update(obj, dt, force, ships)
+            % Update the mine's state, possibly checking for detection, etc.
+            % obj.updateArmament();
+            % obj.updatePosition(); --> see also setDxDy
+            obj.updateDisplay();
+        end 
+        
+        function didSet = setDxDy(obj, dx, dy)
+            didSet = false;
+        end
+        
+        function didSet = setPosition(obj, x, y, z)
+            % Set the mine's position
+            obj.pos_x = x;
+            obj.pos_y = y;
+
+            if nargin>3
+                obj.pos_z = z;
+            end
+
+            didSet = true;
+        end
+        
+        function detected = hasDetected(obj, ship_x, ship_y)
+            % Determine if a ship is within detection range
+            distance = sqrt((obj.pos_x - ship_x)^2 + (obj.pos_y - ship_y)^2);
+            detected = (distance <= obj.detectRange);
+        end
+        
+        function explode(obj)
+            % Broadcast explosion event and kills mine
+            obj.notify('Exploded');
+            obj.alive = false;
+            obj.updateDisplay();
+        end
+        
+        function [inRange, distance] = isInDetectionRange(obj, xyPosToCheck)
+            [inRange, distance] = obj.isInRange(xyPosToCheck, 'detectRange');
+        end
+
+        function [inRange, distance] = isInDamageRange(obj, xyPosToCheck)
+            [inRange, distance] = obj.isInRange(xyPosToCheck, 'damageRange');
+        end
+
+        function [inRange, distance] = isInRange(obj, xyPosToCheck, rangeParameter)
+            ship_x = xyPosToCheck(1);
+            ship_y = xyPosToCheck(2);
+
+            % Check if any of the ships are in range of the mine
+            distance = sqrt((obj.pos_x - ship_x)^2 + (obj.pos_y - ship_y)^2);
+            inRange = distance <= obj.(rangeParameter);
+        end
+
+        function [inDamageRange, inDetectionRange, rangeToShip] = getRangesToShip(obj, shipPosition)
+            ship_x = shipPosition(1);
+            ship_y = shipPosition(2);
+            rangeToShip = sqrt((obj.pos_x - ship_x)^2 + (obj.pos_y - ship_y)^2);
+            inDamageRange = rangeToShip <= obj.damageRange;
+            inDetectionRange = rangeToShip <= obj.detectRange;
+        end
+
+        function aliveStatus = isAlive(obj)
+            % Determine status of alive
+            aliveStatus = obj.alive;
+        end
+        
+        function armedStatus = isArmed(obj)
+            armedStatus = obj.armed;
+        end
+
+
+        function [pass, details] = verify(this)
+            % Default verify enforces override requirement
+
+            msg = sprintf('TODO: verify() not implemented in SEMine. Not ready for integration');
+
+            if nargout == 0
+                fprintf('Verification FAILED: %s\n', msg);
+                error('SEBase:VerifyNotImplemented', msg);
+            else
+                pass = false;
+
+                details = struct();
+                details.className = class(this);
+                details.timestamp = datestr(now);
+                details.pass = pass;
+                details.summary = msg;
+                details.metrics = struct();  % metrics allows each subclass to include domain-specific outputs
+                details.notes = '';             
+
+            end
+        end
+        
+        function pos = getPosition(obj)
+            pos = [obj.pos_x obj.pos_y obj.pos_z];
+        end
+
+    end
+end
